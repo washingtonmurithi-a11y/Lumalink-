@@ -1,28 +1,23 @@
 /**
- * LumaLink Industrial Mathematical Core
- * Universal UMD Module (Node.js + Browser)
- * Implements:
- *  - Full GF(2^8) Galois Field Arithmetic (Primitive Polynomial 0x11D)
- *  - Systematic Reed-Solomon RS(32, 24) Codec (Berlekamp-Massey + Chien + Forney)
- *  - Differential Manchester 8-CSK Optical Symbol Mapper & Soft-Decision Demapper
- *  - IEEE 802.15.7a Optical Link-Budget, SNR, Distance & Shannon Capacity Engine
+ * LumaLink Universal Carrier Engine & Adaptive GF(2^8) FEC Core
+ * Universal Module (Node.js CommonJS + Browser Global)
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory();
   } else {
-    root.LumaCore = factory();
+    root.LumaCarrierEngine = factory();
   }
 }(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
   // ==========================================================================
-  // 1. GALOIS FIELD GF(2^8) LOOKUP TABLES (0x11D = x^8 + x^4 + x^3 + x^2 + 1)
+  // 1. GALOIS FIELD GF(2^8) ARITHMETIC (PRIMITIVE POLYNOMIAL 0x11D)
   // ==========================================================================
   const GF_EXP = new Uint8Array(512);
   const GF_LOG = new Uint8Array(256);
 
-  (function initGaloisTables() {
+  (function buildTables() {
     let x = 1;
     for (let i = 0; i < 255; i++) {
       GF_EXP[i] = x;
@@ -46,10 +41,10 @@
     return GF_EXP[(GF_LOG[a] + 255 - GF_LOG[b]) % 255];
   }
 
-  function gfPow(x, power) {
-    if (power === 0) return 1;
+  function gfPow(x, p) {
+    if (p === 0) return 1;
     if (x === 0) return 0;
-    return GF_EXP[(GF_LOG[x] * power) % 255];
+    return GF_EXP[(GF_LOG[x] * p) % 255];
   }
 
   function gfInv(x) {
@@ -90,13 +85,14 @@
   }
 
   // ==========================================================================
-  // 2. SYSTEMATIC REED-SOLOMON RS(32, 24) CODEC (t = 4 BYTE ERRORS / BLOCK)
+  // 2. ADAPTIVE SYSTEMATIC REED-SOLOMON RS(N, K) CODEC
+  //    Supports RS(32,28) [Speed], RS(32,24) [Balanced], RS(32,16) [Extreme Range]
   // ==========================================================================
-  class ReedSolomonCodec {
+  class AdaptiveReedSolomon {
     constructor(n = 32, k = 24) {
       this.n = n;
       this.k = k;
-      this.nsym = n - k; // 8 parity bytes
+      this.nsym = n - k;
       this.generator = this._buildGenerator(this.nsym);
     }
 
@@ -110,32 +106,30 @@
 
     encodeBlock(dataBytes) {
       if (dataBytes.length !== this.k) {
-        throw new Error(`Expected ${this.k} data bytes, got ${dataBytes.length}`);
+        throw new Error(`Expected ${this.k} bytes, received ${dataBytes.length}`);
       }
-      const msgOut = new Uint8Array(this.n);
-      msgOut.set(dataBytes, 0);
-
+      const out = new Uint8Array(this.n);
+      out.set(dataBytes, 0);
       for (let i = 0; i < this.k; i++) {
-        const coef = msgOut[i];
+        const coef = out[i];
         if (coef !== 0) {
           for (let j = 1; j < this.generator.length; j++) {
-            msgOut[i + j] ^= gfMul(this.generator[j], coef);
+            out[i + j] ^= gfMul(this.generator[j], coef);
           }
         }
       }
-      msgOut.set(dataBytes, 0);
-      return msgOut;
+      out.set(dataBytes, 0);
+      return out;
     }
 
     decodeBlock(receivedBytes) {
       if (receivedBytes.length !== this.n) {
-        throw new Error(`Expected ${this.n} codeword bytes, got ${receivedBytes.length}`);
+        throw new Error(`Expected ${this.n} bytes, received ${receivedBytes.length}`);
       }
       const msg = new Uint8Array(receivedBytes);
-
-      // Step 1: Compute Syndromes S_i = R(alpha^i)
       const synd = new Uint8Array(this.nsym);
       let hasError = false;
+
       for (let i = 0; i < this.nsym; i++) {
         synd[i] = polyEval(msg, gfPow(2, i));
         if (synd[i] !== 0) hasError = true;
@@ -144,7 +138,7 @@
         return { data: msg.slice(0, this.k), errorsCorrected: 0, uncorrectable: false };
       }
 
-      // Step 2: Berlekamp-Massey Error Locator Polynomial
+      // Berlekamp-Massey Algorithm
       let errLoc = new Uint8Array([1]);
       let oldLoc = new Uint8Array([1]);
 
@@ -169,7 +163,7 @@
         return { data: msg.slice(0, this.k), errorsCorrected: 0, uncorrectable: true };
       }
 
-      // Step 3: Chien Search for Error Positions
+      // Chien Search
       const errPos = [];
       for (let i = 0; i < this.n; i++) {
         if (polyEval(errLoc, gfPow(2, i)) === 0) {
@@ -180,132 +174,195 @@
         return { data: msg.slice(0, this.k), errorsCorrected: 0, uncorrectable: true };
       }
 
-      // Step 4: Forney Algorithm for Error Magnitudes
+      // Forney Error Magnitude Evaluation
       const syndRev = new Uint8Array(synd).reverse();
       const errEvalFull = polyMul(syndRev, errLoc);
       const errEval = errEvalFull.slice(errEvalFull.length - this.nsym);
-
       const xList = errPos.map((p) => gfPow(2, this.n - 1 - p));
+
       for (let i = 0; i < xList.length; i++) {
         const xiInv = gfInv(xList[i]);
-        let errLocPrime = 1;
+        let denom = 1;
         for (let j = 0; j < xList.length; j++) {
           if (j !== i) {
-            errLocPrime = gfMul(errLocPrime, 1 ^ gfMul(xiInv, xList[j]));
+            denom = gfMul(denom, 1 ^ gfMul(xiInv, xList[j]));
           }
         }
         const y = polyEval(errEval, xiInv);
-        const magnitude = gfDiv(gfMul(xList[i], y), errLocPrime);
-        msg[errPos[i]] ^= magnitude;
+        const mag = gfDiv(gfMul(xList[i], y), denom);
+        msg[errPos[i]] ^= mag;
       }
 
-      // Verify post-correction syndrome
       for (let i = 0; i < this.nsym; i++) {
         if (polyEval(msg, gfPow(2, i)) !== 0) {
           return { data: msg.slice(0, this.k), errorsCorrected: 0, uncorrectable: true };
         }
       }
-
       return { data: msg.slice(0, this.k), errorsCorrected: errs, uncorrectable: false };
     }
 
-    encodePayload(utf8Text) {
-      const encoder = new TextEncoder();
-      const raw = encoder.encode(utf8Text);
-      // 2-byte big-endian payload length header + raw bytes
-      const framed = new Uint8Array(raw.length + 2);
-      framed[0] = (raw.length >> 8) & 0xFF;
-      framed[1] = raw.length & 0xFF;
-      framed.set(raw, 2);
-
-      const numBlocks = Math.ceil(framed.length / this.k);
-      const encodedStream = new Uint8Array(numBlocks * this.n);
-
+    protectBuffer(uint8Buf) {
+      const numBlocks = Math.max(1, Math.ceil(uint8Buf.length / this.k));
+      const protectedOut = new Uint8Array(numBlocks * this.n);
       for (let b = 0; b < numBlocks; b++) {
         const block = new Uint8Array(this.k);
-        const slice = framed.slice(b * this.k, (b + 1) * this.k);
+        const slice = uint8Buf.slice(b * this.k, (b + 1) * this.k);
         block.set(slice, 0);
-        const codeword = this.encodeBlock(block);
-        encodedStream.set(codeword, b * this.n);
+        protectedOut.set(this.encodeBlock(block), b * this.n);
       }
-      return { encodedStream, numBlocks, originalBytes: raw.length };
-    }
-
-    decodePayload(encodedStream) {
-      const numBlocks = Math.floor(encodedStream.length / this.n);
-      const recovered = new Uint8Array(numBlocks * this.k);
-      let totalCorrected = 0;
-      let failedBlocks = 0;
-
-      for (let b = 0; b < numBlocks; b++) {
-        const block = encodedStream.slice(b * this.n, (b + 1) * this.n);
-        const res = this.decodeBlock(block);
-        recovered.set(res.data, b * this.k);
-        totalCorrected += res.errorsCorrected;
-        if (res.uncorrectable) failedBlocks++;
-      }
-
-      const declaredLen = (recovered[0] << 8) | recovered[1];
-      const safeLen = Math.min(declaredLen, recovered.length - 2);
-      const decoder = new TextDecoder('utf-8', { fatal: false });
-      const text = decoder.decode(recovered.slice(2, 2 + safeLen));
-
-      return { text, totalCorrected, failedBlocks, numBlocks };
+      return { protectedOut, numBlocks, codeRate: +(this.k / this.n).toFixed(3) };
     }
   }
 
   // ==========================================================================
-  // 3. 8-CSK OPTICAL CONSTELLATION & LINK-BUDGET PHYSICS CALCULATOR
+  // 3. UNIVERSAL CARRIER BONDING & WEIGHTED DEFICIT ROUND-ROBIN SCHEDULER
   // ==========================================================================
-  const CSK_PALETTE = [
-    { sym: 0, name: 'BLACK_REF', rgb: [15, 23, 42] },
-    { sym: 1, name: 'PURE_BLUE', rgb: [0, 128, 255] },
-    { sym: 2, name: 'PURE_GREEN', rgb: [0, 230, 118] },
-    { sym: 3, name: 'CYAN_MIX', rgb: [0, 229, 255] },
-    { sym: 4, name: 'PURE_RED', rgb: [255, 61, 87] },
-    { sym: 5, name: 'MAGENTA_MIX', rgb: [234, 0, 255] },
-    { sym: 6, name: 'YELLOW_MIX', rgb: [255, 214, 0] },
-    { sym: 7, name: 'WHITE_PEAK', rgb: [248, 250, 252] }
+  const DEFAULT_CARRIERS = [
+    {
+      id: 'wifi_6e_lan',
+      name: 'Wi-Fi 6/6E Local Booster',
+      category: 'IEEE 802.11ax/be',
+      enabled: true,
+      bandwidthMbps: 320,
+      rttMs: 4.2,
+      jitterMs: 1.1,
+      rssiDbm: -54,
+      lossPct: 0.2
+    },
+    {
+      id: 'cell_5g_nr',
+      name: '5G NR / LTE Carrier Modem',
+      category: '3GPP Rel-17 Sub-6',
+      enabled: true,
+      bandwidthMbps: 185,
+      rttMs: 18.5,
+      jitterMs: 4.8,
+      rssiDbm: -76,
+      lossPct: 1.1
+    },
+    {
+      id: 'fiber_wan',
+      name: 'Ethernet / GPON Fiber Uplink',
+      category: 'IEEE 802.3 / ITU-T G.984',
+      enabled: true,
+      bandwidthMbps: 500,
+      rttMs: 6.0,
+      jitterMs: 0.6,
+      rssiDbm: -12,
+      lossPct: 0.01
+    },
+    {
+      id: 'optical_8csk',
+      name: 'LumaLink 8-CSK Optical PHY',
+      category: 'IEEE 802.15.7a OCC',
+      enabled: true,
+      bandwidthMbps: 12.5,
+      rttMs: 1.4,
+      jitterMs: 0.3,
+      rssiDbm: -42,
+      lossPct: 0.0
+    },
+    {
+      id: 'satcom_leo',
+      name: 'LEO Satellite Backhaul',
+      category: 'Ku/Ka-Band Phased Array',
+      enabled: false,
+      bandwidthMbps: 140,
+      rttMs: 34.0,
+      jitterMs: 8.4,
+      rssiDbm: -82,
+      lossPct: 1.8
+    },
+    {
+      id: 'mesh_relay',
+      name: 'Multi-Hop Peer Mesh Extender',
+      category: '802.11s / WebRTC Relay',
+      enabled: true,
+      bandwidthMbps: 95,
+      rttMs: 9.5,
+      jitterMs: 2.3,
+      rssiDbm: -68,
+      lossPct: 0.6
+    }
   ];
 
-  function computeLinkMetrics({
-    distanceMeters = 12,
-    mimoGrid = 4,          // 1x1, 4x4, or 8x8 parallel spatial emitter array
-    symbolRateHz = 32400,  // 32.4 kHz rolling shutter rate
-    ambientLux = 400,      // Indoor office lighting
-    bokehEnabled = true,
-    fecRate = 24 / 32
-  }) {
-    const spatialChannels = mimoGrid * mimoGrid;
-    const bitsPerSymbol = 3; // 8-CSK = log2(8) = 3 bits/symbol
-    const rawBitrateBps = symbolRateHz * bitsPerSymbol * spatialChannels;
-    const netGoodputBps = rawBitrateBps * fecRate;
+  class CarrierBondingScheduler {
+    constructor(carriers = DEFAULT_CARRIERS) {
+      this.carriers = JSON.parse(JSON.stringify(carriers));
+    }
 
-    // Lambertian optical path-loss + Bokeh spatial integration gain
-    const bokehGainDb = bokehEnabled ? 11.4 : 0.0;
-    const glareNoiseDb = 10 * Math.log10(Math.max(1, ambientLux / 120));
-    const pathLossDb = 20 * Math.log10(Math.max(0.5, distanceMeters));
-    const snrDb = Math.max(-4, 34.5 + bokehGainDb - pathLossDb - glareNoiseDb);
+    updateCarrier(id, patch) {
+      const target = this.carriers.find((c) => c.id === id);
+      if (!target) return null;
+      Object.assign(target, patch);
+      return target;
+    }
 
-    // Approximate 8-CSK symbol error probability -> post-RS(32,24) BER
-    const snrLinear = Math.pow(10, snrDb / 10);
-    const rawSer = Math.min(0.45, 0.5 * Math.exp(-0.38 * snrLinear));
-    const postFecBer = rawSer < 0.09 ? rawSer * Math.pow(rawSer / 0.125, 4) : rawSer;
+    getActiveCarriers() {
+      return this.carriers.filter((c) => c.enabled);
+    }
 
-    return {
-      spatialChannels,
-      rawBitrateKbps: +(rawBitrateBps / 1000).toFixed(2),
-      netGoodputKbps: +(netGoodputBps / 1000).toFixed(2),
-      snrDb: +snrDb.toFixed(2),
-      rawBer: +rawSer.toExponential(2),
-      postFecBer: +postFecBer.toExponential(2),
-      maxReliableRangeMeters: +(bokehEnabled ? 38.5 : 11.2).toFixed(1)
-    };
+    /**
+     * Distributes a media/data payload across all active carriers proportional
+     * to (Bandwidth / (1 + RTT_Penalty + Loss_Penalty)) using Weighted Deficit Round-Robin.
+     */
+    schedulePayloadBytes(totalBytes, distanceMeters = 15) {
+      const active = this.getActiveCarriers();
+      if (active.length === 0) {
+        return { aggregateMbps: 0, effectiveJitterMs: 999, allocations: [], recommendedFec: [32, 16] };
+      }
+
+      const weights = active.map((c) => {
+        const distPenalty = c.id === 'wifi_6e_lan' ? Math.max(1, distanceMeters / 25) : 1;
+        const qualityScore = (c.bandwidthMbps / distPenalty) / (1 + c.rttMs * 0.04 + c.lossPct * 0.5);
+        return Math.max(1, qualityScore);
+      });
+
+      const totalWeight = weights.reduce((a, b) => a + b, 0);
+      let remainingBytes = totalBytes;
+      const allocations = active.map((c, idx) => {
+        const share = weights[idx] / totalWeight;
+        const assignedBytes = idx === active.length - 1
+          ? remainingBytes
+          : Math.round(totalBytes * share);
+        remainingBytes = Math.max(0, remainingBytes - assignedBytes);
+        return {
+          id: c.id,
+          name: c.name,
+          category: c.category,
+          sharePct: +(share * 100).toFixed(1),
+          assignedBytes,
+          bandwidthMbps: c.bandwidthMbps,
+          rttMs: c.rttMs
+        };
+      });
+
+      const aggregateMbps = active.reduce((sum, c) => {
+        const distFactor = c.id === 'wifi_6e_lan' ? Math.max(0.2, Math.min(1, 30 / Math.max(1, distanceMeters))) : 1;
+        return sum + c.bandwidthMbps * distFactor;
+      }, 0);
+
+      // Jitter-buffer smoothing across parallel paths lowers effective playback jitter
+      const minJitter = Math.min(...active.map((c) => c.jitterMs));
+      const effectiveJitterMs = +(minJitter * 0.72).toFixed(2);
+
+      // Select RS(N, K) profile dynamically based on booster distance
+      let recommendedFec = [32, 28];
+      if (distanceMeters > 75) recommendedFec = [32, 16];
+      else if (distanceMeters > 30) recommendedFec = [32, 24];
+
+      return {
+        aggregateMbps: +aggregateMbps.toFixed(1),
+        effectiveJitterMs,
+        allocations,
+        recommendedFec
+      };
+    }
   }
 
   return {
-    ReedSolomonCodec,
-    CSK_PALETTE,
-    computeLinkMetrics
+    AdaptiveReedSolomon,
+    CarrierBondingScheduler,
+    DEFAULT_CARRIERS
   };
 }));
