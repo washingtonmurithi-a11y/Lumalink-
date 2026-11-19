@@ -1,0 +1,22 @@
+{
+  "name": "lumalink-carrier-engine",
+  "version": "2.4.0",
+  "description": "Universal Multi-Carrier Bonding, Adaptive GF(2^8) Reed-Solomon FEC, Live Video Edge Accelerator & IEEE 802.15.7a Optical Wi-Fi Gateway",
+  "main": "server/gateway.js",
+  "scripts": {
+    "start": "node server/gateway.js",
+    "test": "node test/verify_core.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "reed-solomon",
+    "carrier-bonding",
+    "optical-camera-communication",
+    "webrtc",
+    "hls-proxy",
+    "wifi-edge-gateway"
+  ],
+  "license": "MIT"
+}
