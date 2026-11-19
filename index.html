@@ -1,609 +1,152 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LumaLink Industrial | Self-Hosted Wi-Fi &amp; Optical Transceiver Portal</title>
-  <script src="/core/fec_gf256.js"></script>
-  <style>
-    :root {
-      --bg: #070b12;
-      --panel: #0e1524;
-      --panel-alt: #131d31;
-      --border: #1e2d4a;
-      --cyan: #00e5ff;
-      --emerald: #00e676;
-      --amber: #ffab00;
-      --crimson: #ff3d57;
-      --text: #e2e8f0;
-      --muted: #8496b0;
-      --mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
-      --sans: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--sans);
-      line-height: 1.5;
-    }
-    header {
-      background: linear-gradient(90deg, #0b1220, #101b30);
-      border-bottom: 1px solid var(--border);
-      padding: 14px 24px;
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-    }
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .pulse-dot {
-      width: 11px; height: 11px; border-radius: 50%;
-      background: var(--emerald);
-      box-shadow: 0 0 12px var(--emerald);
-    }
-    .brand h1 { font-size: 1.15rem; letter-spacing: 0.04em; font-weight: 700; }
-    .brand span { color: var(--cyan); font-family: var(--mono); font-size: 0.8rem; }
-    .status-bar { display: flex; gap: 10px; flex-wrap: wrap; font-family: var(--mono); font-size: 0.78rem; }
-    .badge {
-      padding: 4px 10px; border-radius: 4px;
-      background: var(--panel-alt); border: 1px solid var(--border);
-    }
-    .badge.ok { border-color: rgba(0,230,118,0.4); color: var(--emerald); }
-    .badge.cyan { border-color: rgba(0,229,255,0.4); color: var(--cyan); }
+files["public/index.html"] = """
+<!-- UNIVERSAL LINK & PHONE PAIRING ACTION BAR -->
+<div class="universal-link-bar">
+  <input type="url" id="quickLinkInput" placeholder="Paste live video (.m3u8 / .mp4) or stream URL to accelerate..." />
+  <select id="quickFecSelect" title="Reed-Solomon Error Correction Tier">
+    <option value="speed">RS(32,28) Max Speed</option>
+    <option value="balanced" selected>RS(32,24) Balanced FEC</option>
+    <option value="extreme">RS(32,16) Far Range</option>
+  </select>
+  <button class="btn-emerald" onclick="StreamPlayer.ingestFromBar()">LINK &amp; ACCELERATE</button>
+  <button class="btn-cyan" onclick="DeviceLinkManager.togglePairModal(true)">LINK PHONE / DEVICE (QR)</button>
+</div>
 
-    main {
-      max-width: 1440px;
-      margin: 0 auto;
-      padding: 20px;
-      display: grid;
-      grid-template-columns: repeat(12, 1fr);
-      gap: 18px;
-    }
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 18px;
-    }
-    .card h2 {
-      font-size: 0.92rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--cyan);
-      margin-bottom: 14px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .span-4 { grid-column: span 4; }
-    .span-6 { grid-column: span 6; }
-    .span-8 { grid-column: span 8; }
-    .span-12 { grid-column: span 12; }
-    @media (max-width: 1024px) {
-      .span-4, .span-6, .span-8 { grid-column: span 12; }
-    }
-
-    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    label { display: block; font-size: 0.76rem; color: var(--muted); margin-bottom: 4px; font-family: var(--mono); }
-    input, select, textarea {
-      width: 100%;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 8px 10px;
-      border-radius: 5px;
-      font-family: var(--mono);
-      font-size: 0.84rem;
-    }
-    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--cyan); }
-
-    button {
-      background: var(--cyan);
-      color: #030712;
-      border: none;
-      padding: 9px 14px;
-      border-radius: 5px;
-      font-weight: 700;
-      font-size: 0.82rem;
-      cursor: pointer;
-      font-family: var(--mono);
-      transition: opacity 0.15s;
-    }
-    button:hover { opacity: 0.9; }
-    button.secondary { background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); }
-    button.emerald { background: var(--emerald); color: #030712; }
-    button.danger { background: var(--crimson); color: #fff; }
-
-    .kpi-row {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
-      margin-top: 12px;
-    }
-    .kpi {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      padding: 10px;
-      border-radius: 6px;
-    }
-    .kpi .val { font-family: var(--mono); font-size: 1.15rem; font-weight: 700; color: var(--emerald); }
-    .kpi .lbl { font-size: 0.72rem; color: var(--muted); }
-
-    .peer-list { display: flex; flex-direction: column; gap: 8px; max-height: 210px; overflow-y: auto; }
-    .peer-item {
-      display: flex; justify-content: space-between; align-items: center;
-      background: var(--bg); border: 1px solid var(--border);
-      padding: 8px 12px; border-radius: 5px; font-family: var(--mono); font-size: 0.8rem;
-    }
-    .log-box {
-      background: #04070d;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 10px;
-      height: 190px;
-      overflow-y: auto;
-      font-family: var(--mono);
-      font-size: 0.78rem;
-      color: #cbd5e1;
-    }
-    .log-entry { margin-bottom: 6px; border-bottom: 1px solid #10192b; padding-bottom: 4px; }
-    canvas {
-      width: 100%;
-      background: #03060c;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      display: block;
-    }
-  </style>
-</head>
-<body>
-  <header>
-    <div class="brand">
-      <div class="pulse-dot" id="connDot"></div>
-      <div>
-        <h1>LUMALINK INDUSTRIAL EDGE GATEWAY</h1>
-        <span>IEEE 802.15.7a 8-CSK OPTICAL + WI-FI LAN WEBRTC BRIDGE</span>
-      </div>
+<div class="header-badges">
+  <div class="pill cyan" id="badgeHostUrl">HOST: DETECTING...</div>
+  <div class="pill emerald" id="badgeSpeedGain">SPEED: --x</div>
+  <div class="pill amber" id="badgeHealedTotal">HEALED: 0 BYTES</div>
+</div>
+<!-- PANEL 2: LIVE SIGNAL ACTIVITY OSCILLOSCOPE & CHROMATICITY -->
+<section class="card span-7">
+  <div class="card-head">
+    <h2>02 // LIVE SIGNAL ACTIVITY, CARRIER WAVEFORMS &amp; 8-CSK CONSTELLATION</h2>
+    <div class="btn-group">
+      <button class="btn-ghost active" id="btnScopeWave" onclick="SignalOscilloscope.setMode('waveform')">WAVEFORMS &amp; JITTER</button>
+      <button class="btn-ghost" id="btnScopeCsk" onclick="SignalOscilloscope.setMode('constellation')">8-CSK CHROMATICITY</button>
     </div>
-    <div class="status-bar">
-      <div class="badge cyan" id="wifiHostBadge">WIFI HOST: DETECTING...</div>
-      <div class="badge ok" id="peerCountBadge">LAN PEERS: 1</div>
-      <div class="badge" id="hwNodeBadge">ESP32-S3 PHY: 0</div>
+  </div>
+  <canvas id="mainSignalCanvas" height="250"></canvas>
+  <div class="scope-legend">
+    <span><i class="swatch cyan"></i> Kalman Smoothed Jitter (ms)</span>
+    <span><i class="swatch emerald"></i> Bonded Carrier Throughput Load (Mbps)</span>
+    <span><i class="swatch amber"></i> Optical 8-CSK Differential Carrier (32.4 kHz)</span>
+  </div>
+</section>
+
+<!-- PANEL 3: WI-FI CREDENTIAL HOSTING, BOOSTER DISTANCE & LONGEVITY -->
+<section class="card span-5">
+  <div class="card-head">
+    <h2>03 // WI-FI HOST, BOOSTER DISTANCE &amp; LONGEVITY GOVERNOR</h2>
+  </div>
+  <div class="form-2col">
+    <div>
+      <label>WI-FI NETWORK SSID</label>
+      <input type="text" id="cfgWifiSsid" placeholder="MyHomeOrField_WiFi" />
     </div>
-  </header>
+    <div>
+      <label>HOSTED LAN IP ADDRESS</label>
+      <select id="cfgHostIp"></select>
+    </div>
+    <div>
+      <label>LONGEVITY / BATTERY PROFILE</label>
+      <select id="cfgLongevity">
+        <option value="eco">Ultra-Longevity (52.0 hrs)</option>
+        <option value="balanced" selected>Adaptive Balanced (26.0 hrs)</option>
+        <option value="max_boost">Max Booster Gain (14.5 hrs)</option>
+      </select>
+    </div>
+    <div>
+      <label>OPTICAL MIMO EMITTER GRID</label>
+      <select id="cfgMimoGrid">
+        <option value="1">1x1 Single RGB LED</option>
+        <option value="4" selected>4x4 Optical Array (16 Ch)</option>
+        <option value="8">8x8 Industrial Matrix (64 Ch)</option>
+      </select>
+    </div>
+  </div>
+  <div style="margin-top:10px;">
+    <label>DISTANCE FROM GROUND BOOSTER: <strong id="cfgDistLabel" class="cyan">25 m</strong></label>
+    <input type="range" id="cfgDistSlider" min="5" max="160" value="25" oninput="AppState.previewDistance(this.value)" />
+  </div>
+  <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
+    <button class="btn-cyan" onclick="AppState.saveWifiConfig()">APPLY &amp; BROADCAST HOST CONFIG</button>
+    <span id="cfgSaveFeedback" class="emerald mono-tag"></span>
+  </div>
+</section>
 
-  <main>
-    <!-- 1. WI-FI HOST & LINK BUDGET CONFIGURATION -->
-    <section class="card span-6">
-      <h2>
-        <span>01 // Wi-Fi Network Host &amp; Optical PHY Config</span>
-        <span style="font-size:0.74rem;color:var(--muted)" id="myNodeId">ID: ----</span>
-      </h2>
-      <div class="form-grid">
-        <div>
-          <label>LOCAL WI-FI SSID NAME</label>
-          <input type="text" id="wifiSsid" placeholder="MyHomeOrLab_WiFi" />
-        </div>
-        <div>
-          <label>HOSTED LAN IP ADDRESS</label>
-          <select id="hostIpSelect"></select>
-        </div>
-        <div>
-          <label>OPTICAL CARRIER RATE (HZ)</label>
-          <input type="number" id="symbolRateHz" value="32400" min="1000" max="100000" />
-        </div>
-        <div>
-          <label>SPATIAL MIMO ARRAY GRID</label>
-          <select id="mimoGrid">
-            <option value="1">1x1 Single Emitter</option>
-            <option value="4" selected>4x4 Parallel Array (16 Ch)</option>
-            <option value="8">8x8 Industrial Matrix (64 Ch)</option>
-          </select>
-        </div>
-        <div>
-          <label>TARGET LINK DISTANCE (METERS)</label>
-          <input type="number" id="distanceMeters" value="12" min="1" max="50" />
-        </div>
-        <div>
-          <label>BOKEH DEFOCUS &amp; RS(32,24) FEC</label>
-          <select id="bokehEnabled">
-            <option value="true" selected>ENABLED (Long-Range + 4-Byte FEC)</option>
-            <option value="false">DISABLED (Sharp Focus Only)</option>
-          </select>
-        </div>
-      </div>
-      <div style="margin-top:12px; display:flex; gap:10px; align-items:center;">
-        <button onclick="saveWifiConfig()">SAVE &amp; BROADCAST WI-FI HOST CONFIG</button>
-        <span id="cfgSaveMsg" style="font-family:var(--mono);font-size:0.78rem;color:var(--emerald);"></span>
-      </div>
+<!-- PANEL 4: REAL-TIME CORRECTION & CORRECTED FORENSICS INSPECTOR -->
+<section class="card span-7">
+  <div class="card-head">
+    <h2>04 // SIGNAL CORRECTION &amp; CORRECTED FORENSICS (GF(2⁸) REED-SOLOMON)</h2>
+    <span class="mono-tag emerald" id="fecStatusBadge">0 UNCORRECTABLE BLOCKS</span>
+  </div>
+  <div class="fec-controls">
+    <input type="text" id="fecTestPayload" value="LUMALINK_TELEMETRY_FRAME_01::VOICE+VIDEO+OPTICAL_SYNC" />
+    <select id="fecNoiseLevel">
+      <option value="0.06">6% Channel Noise (2 Bytes Corrupted/Block)</option>
+      <option value="0.12" selected>12% Heavy Interference (4 Bytes Corrupted/Block)</option>
+      <option value="0.22">22% Extreme Fading (7 Bytes Corrupted - RS(32,16))</option>
+    </select>
+    <button class="btn-emerald" onclick="CorrectionInspector.runLiveTest()">INJECT NOISE &amp; HEAL</button>
+  </div>
 
-      <div class="kpi-row">
-        <div class="kpi"><div class="val" id="kpiGoodput">--</div><div class="lbl">NET GOODPUT (KBPS)</div></div>
-        <div class="kpi"><div class="val" id="kpiSnr">--</div><div class="lbl">LINK SNR (DB)</div></div>
-        <div class="kpi"><div class="val" id="kpiBer">--</div><div class="lbl">POST-FEC BER</div></div>
-        <div class="kpi"><div class="val" id="kpiRange">--</div><div class="lbl">MAX RANGE (M)</div></div>
-      </div>
-    </section>
+  <div class="hex-forensics-grid">
+    <div class="hex-box">
+      <div class="hex-title">1. TRANSMITTED ENCODED CODEWORD (BLOCK 0 HEX)</div>
+      <pre id="hexCleanTx">--</pre>
+    </div>
+    <div class="hex-box">
+      <div class="hex-title danger">2. CHANNEL-CORRUPTED RECEIVED BYTES (BEFORE FEC)</div>
+      <pre id="hexCorruptedRx">--</pre>
+    </div>
+    <div class="hex-box">
+      <div class="hex-title emerald">3. BERLEKAMP-MASSEY &amp; FORNEY CORRECTED OUTPUT</div>
+      <pre id="hexHealedOut">--</pre>
+    </div>
+  </div>
 
-    <!-- 2. FULL-DUPLEX WEBRTC VOICE / PHONE CALL OVER WI-FI LAN -->
-    <section class="card span-6">
-      <h2>
-        <span>02 // Full-Duplex LAN Voice Call (WebRTC Opus)</span>
-        <span id="callStatus" style="color:var(--emerald);font-size:0.76rem;">STANDBY</span>
-      </h2>
-      <p style="font-size:0.8rem;color:var(--muted);margin-bottom:10px;">
-        Open <strong style="color:var(--text)" id="shareUrlText">http://&lt;WIFI-IP&gt;:8080</strong> on any phone or laptop on your Wi-Fi to appear below and place zero-internet LAN voice calls.
-      </p>
-      <div class="peer-list" id="peerList"></div>
-      <div style="margin-top:12px; display:flex; gap:10px; align-items:center;">
-        <button class="danger" id="hangupBtn" style="display:none;" onclick="hangupCall()">END VOICE CALL</button>
-        <audio id="remoteAudio" autoplay playsinline></audio>
-      </div>
-      <div style="margin-top:12px;">
-        <label>REAL-TIME VOCAL ACOUSTIC SPECTRUM (LOCAL MIC / CALL MONITOR)</label>
-        <canvas id="audioCanvas" height="90"></canvas>
-      </div>
-    </section>
+  <div class="repair-log" id="repairLogContainer"></div>
+</section>
 
-    <!-- 3. REED-SOLOMON RS(32,24) SELF-HEALING DATA & OPTICAL STREAMER -->
-    <section class="card span-6">
-      <h2><span>03 // RS(32,24) Self-Healing Hybrid Data &amp; ESP32 Bridge</span></h2>
-      <div class="form-grid" style="margin-bottom:10px;">
-        <div>
-          <label>CHANNEL CORRUPTION STRESS TEST (%)</label>
-          <select id="noiseStress">
-            <option value="0">0% (Clean Line-of-Sight)</option>
-            <option value="0.12" selected>12% (Heavy Sunlight / Occlusion)</option>
-            <option value="0.22">22% (Maximum RS(32,24) Limit)</option>
-          </select>
-        </div>
-        <div>
-          <label>OPTICAL SCREEN BEAMER</label>
-          <button class="secondary" style="width:100%;" onclick="toggleOpticalBeamer()">TOGGLE 8-CSK SCREEN MATRIX</button>
-        </div>
-      </div>
-      <div style="display:flex; gap:8px; margin-bottom:10px;">
-        <input type="text" id="txMessageInput" value="INDUSTRIAL_TELEMETRY_PACKET_01: TEMP=24.8C | LINK=LOCKED" />
-        <button class="emerald" onclick="transmitProtectedData()">TRANSMIT</button>
-      </div>
-      <div class="log-box" id="rxLogBox"></div>
-    </section>
+<!-- PANEL 5: ACCELERATED LIVE VIDEO STREAMER -->
+<section class="card span-5">
+  <div class="card-head">
+    <h2>05 // ACCELERATED LIVE STREAM &amp; EDGE CACHE PLAYER</h2>
+    <span class="mono-tag cyan" id="streamCacheStat">CACHE HITS: 0</span>
+  </div>
+  <div class="preset-row">
+    <button class="btn-ghost" onclick="StreamPlayer.loadPreset('https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', 'Live HLS 1080p Stream')">
+      LOAD LIVE HLS (.M3U8)
+    </button>
+    <button class="btn-ghost" onclick="StreamPlayer.loadPreset('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', 'HD Progressive MP4')">
+      LOAD HD MP4 STREAM
+    </button>
+  </div>
+  <video id="edgeVideoPlayer" controls playsinline muted></video>
+  <div class="stream-caption" id="streamCaptionText">Paste any live stream link in the top bar or load a preset to route through LumaLink's multi-carrier RAM cache.</div>
+</section>
 
-    <!-- 4. LIVE 8-CSK OPTICAL MATRIX & SIGNAL OSCILLOSCOPE -->
-    <section class="card span-6">
-      <h2><span>04 // Live 8-CSK Spatial Color Matrix &amp; Carrier Scope</span></h2>
-      <canvas id="opticalCanvas" height="265"></canvas>
-    </section>
-  </main>
+<!-- PANEL 6: UNIVERSAL MULTI-CARRIER BONDING MATRIX -->
+<section class="card span-7">
+  <div class="card-head">
+    <h2>06 // UNIVERSAL MULTI-CARRIER BONDING MATRIX (WDRR PACKET STRIPING)</h2>
+    <span class="mono-tag" id="bondedTotalTag">-- MBPS TOTAL</span>
+  </div>
+  <div id="carrierMatrixList"></div>
+</section>
 
-  <script>
-    const rsCodec = new LumaCore.ReedSolomonCodec(32, 24);
-    let ws = null;
-    let myId = null;
-    let peerConnection = null;
-    let localStream = null;
-    let activeCallPeerId = null;
-    let opticalBeamerActive = true;
-    let latestEncodedBytes = new Uint8Array([0xA5, 0x5A, 0x3C, 0xC3, 0xF0, 0x0F]);
-
-    // ========================================================================
-    // 1. WEBSOCKET CONNECTION TO SELF-HOSTED WI-FI SERVER
-    // ========================================================================
-    function connectWebSocket() {
-      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${proto}//${location.host}`);
-
-      ws.onopen = () => {
-        document.getElementById('connDot').style.background = '#00e676';
-        ws.send(JSON.stringify({
-          type: 'REGISTER_PEER',
-          name: `${navigator.platform || 'Device'}-${Math.floor(100 + Math.random() * 900)}`
-        }));
-      };
-
-      ws.onmessage = async (event) => {
-        const msg = JSON.parse(event.data);
-
-        if (msg.type === 'WELCOME') {
-          myId = msg.clientId;
-          document.getElementById('myNodeId').textContent = `ID: ${myId}`;
-          applyServerConfig(msg.config, msg.interfaces);
-        } else if (msg.type === 'CONFIG_UPDATED') {
-          applyServerConfig(msg.config);
-        } else if (msg.type === 'PEER_LIST') {
-          renderPeerList(msg.peers, msg.hardwareNodes);
-        } else if (msg.type === 'OPTICAL_RX_DATA') {
-          appendRxLog(msg);
-          latestEncodedBytes = new TextEncoder().encode(msg.text);
-        } else if (msg.type === 'CALL_OFFER') {
-          await handleIncomingCallOffer(msg);
-        } else if (msg.type === 'CALL_ANSWER') {
-          if (peerConnection) await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-        } else if (msg.type === 'CALL_ICE') {
-          if (peerConnection && msg.candidate) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(msg.candidate));
-          }
-        } else if (msg.type === 'CALL_HANGUP') {
-          cleanupCall();
-        }
-      };
-
-      ws.onclose = () => {
-        document.getElementById('connDot').style.background = '#ff3d57';
-        setTimeout(connectWebSocket, 2000);
-      };
-    }
-
-    function applyServerConfig(cfg, interfaces = null) {
-      if (!cfg) return;
-      document.getElementById('wifiSsid').value = cfg.wifiSsid || '';
-      document.getElementById('symbolRateHz').value = cfg.symbolRateHz || 32400;
-      document.getElementById('mimoGrid').value = String(cfg.mimoGrid || 4);
-      document.getElementById('bokehEnabled').value = String(cfg.bokehEnabled !== false);
-
-      const ipSelect = document.getElementById('hostIpSelect');
-      if (interfaces && interfaces.length > 0) {
-        ipSelect.innerHTML = interfaces
-          .map((i) => `<option value="${i.ip}">${i.ip} (${i.interface})</option>`)
-          .join('');
-      } else if (ipSelect.options.length === 0) {
-        ipSelect.innerHTML = `<option value="${cfg.hostIp}">${cfg.hostIp}</option>`;
-      }
-      ipSelect.value = cfg.hostIp;
-
-      const hostUrl = `http://${cfg.hostIp}:${cfg.httpPort || 8080}`;
-      document.getElementById('wifiHostBadge').textContent = `WIFI HOST: ${cfg.hostIp}:${cfg.httpPort || 8080}`;
-      document.getElementById('shareUrlText').textContent = hostUrl;
-      updateMetricsDisplay();
-    }
-
-    async function saveWifiConfig() {
-      const payload = {
-        wifiSsid: document.getElementById('wifiSsid').value,
-        hostIp: document.getElementById('hostIpSelect').value,
-        symbolRateHz: Number(document.getElementById('symbolRateHz').value),
-        mimoGrid: Number(document.getElementById('mimoGrid').value),
-        bokehEnabled: document.getElementById('bokehEnabled').value === 'true'
-      };
-      const res = await fetch('/api/wifi-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        document.getElementById('cfgSaveMsg').textContent = 'SAVED & SYNCED ACROSS WI-FI LAN';
-        setTimeout(() => { document.getElementById('cfgSaveMsg').textContent = ''; }, 3000);
-      }
-    }
-
-    function updateMetricsDisplay() {
-      const metrics = LumaCore.computeLinkMetrics({
-        distanceMeters: Number(document.getElementById('distanceMeters').value),
-        mimoGrid: Number(document.getElementById('mimoGrid').value),
-        symbolRateHz: Number(document.getElementById('symbolRateHz').value),
-        bokehEnabled: document.getElementById('bokehEnabled').value === 'true'
-      });
-      document.getElementById('kpiGoodput').textContent = metrics.netGoodputKbps;
-      document.getElementById('kpiSnr').textContent = `${metrics.snrDb} dB`;
-      document.getElementById('kpiBer').textContent = metrics.postFecBer;
-      document.getElementById('kpiRange').textContent = `${metrics.maxReliableRangeMeters} m`;
-    }
-    ['distanceMeters', 'mimoGrid', 'symbolRateHz', 'bokehEnabled'].forEach((id) => {
-      document.getElementById(id).addEventListener('change', updateMetricsDisplay);
-    });
-
-    // ========================================================================
-    // 2. WEBRTC FULL-DUPLEX VOICE CALL ENGINE OVER LOCAL WI-FI
-    // ========================================================================
-    function renderPeerList(peers, hardwareNodes) {
-      document.getElementById('peerCountBadge').textContent = `LAN PEERS: ${peers.length}`;
-      document.getElementById('hwNodeBadge').textContent = `ESP32-S3 PHY: ${hardwareNodes}`;
-      const container = document.getElementById('peerList');
-      container.innerHTML = '';
-
-      peers.forEach((p) => {
-        const isSelf = p.id === myId;
-        const div = document.createElement('div');
-        div.className = 'peer-item';
-        div.innerHTML = `
-          <div>
-            <strong>${p.name}</strong> ${isSelf ? '<span style="color:var(--cyan)">(THIS DEVICE)</span>' : ''}
-            <div style="font-size:0.72rem;color:var(--muted)">IP: ${p.ip}</div>
-          </div>
-          ${!isSelf ? `<button class="emerald" onclick="startVoiceCall('${p.id}', '${p.name}')">CALL</button>` : ''}
-        `;
-        container.appendChild(div);
-      });
-    }
-
-    async function initAudioPipeline() {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        alert('Microphone capture requires localhost or HTTPS in browser security settings.');
-        return null;
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-      });
-      startAudioSpectrumVisualizer(stream);
-      return stream;
-    }
-
-    function createPeerConnection(targetId) {
-      const pc = new RTCPeerConnection({ iceServers: [] }); // Pure LAN zero-internet ICE
-      pc.onicecandidate = (e) => {
-        if (e.candidate && ws) {
-          ws.send(JSON.stringify({ type: 'CALL_ICE', targetId, candidate: e.candidate }));
-        }
-      };
-      pc.ontrack = (e) => {
-        document.getElementById('remoteAudio').srcObject = e.streams[0];
-      };
-      return pc;
-    }
-
-    async function startVoiceCall(targetId, targetName) {
-      localStream = await initAudioPipeline();
-      if (!localStream) return;
-
-      activeCallPeerId = targetId;
-      peerConnection = createPeerConnection(targetId);
-      localStream.getTracks().forEach((t) => peerConnection.addTrack(t, localStream));
-
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-
-      ws.send(JSON.stringify({ type: 'CALL_OFFER', targetId, sdp: offer }));
-      document.getElementById('callStatus').textContent = `CONNECTED -> ${targetName}`;
-      document.getElementById('hangupBtn').style.display = 'inline-block';
-    }
-
-    async function handleIncomingCallOffer(msg) {
-      localStream = await initAudioPipeline();
-      if (!localStream) return;
-
-      activeCallPeerId = msg.fromId;
-      peerConnection = createPeerConnection(msg.fromId);
-      localStream.getTracks().forEach((t) => peerConnection.addTrack(t, localStream));
-
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-
-      ws.send(JSON.stringify({ type: 'CALL_ANSWER', targetId: msg.fromId, sdp: answer }));
-      document.getElementById('callStatus').textContent = `IN CALL WITH ${msg.fromName}`;
-      document.getElementById('hangupBtn').style.display = 'inline-block';
-    }
-
-    function hangupCall() {
-      if (activeCallPeerId && ws) {
-        ws.send(JSON.stringify({ type: 'CALL_HANGUP', targetId: activeCallPeerId }));
-      }
-      cleanupCall();
-    }
-
-    function cleanupCall() {
-      if (peerConnection) { peerConnection.close(); peerConnection = null; }
-      if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null; }
-      activeCallPeerId = null;
-      document.getElementById('callStatus').textContent = 'STANDBY';
-      document.getElementById('hangupBtn').style.display = 'none';
-    }
-
-    // ========================================================================
-    // 3. REED-SOLOMON RS(32,24) DATA & OPTICAL SCREEN MATRIX RENDERER
-    // ========================================================================
-    function transmitProtectedData() {
-      const payload = document.getElementById('txMessageInput').value;
-      const noiseRate = Number(document.getElementById('noiseStress').value);
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'OPTICAL_TX_DATA', payload, noiseRate }));
-      }
-    }
-
-    function appendRxLog(msg) {
-      const box = document.getElementById('rxLogBox');
-      const t = msg.telemetry;
-      const entry = document.createElement('div');
-      entry.className = 'log-entry';
-      entry.innerHTML = `
-        <span style="color:var(--cyan)">[${msg.fromName}]</span>
-        <strong style="color:var(--emerald)">${msg.text}</strong>
-        <div style="color:var(--muted);font-size:0.72rem;">
-          RS(32,24) Blocks: ${t.numBlocks} | Injected Byte Errors: ${t.injectedErrors} |
-          Self-Healed: <span style="color:var(--emerald)">${t.errorsCorrected}</span> |
-          ESP32 Nodes Relayed: ${t.hardwareRelayed}
-        </div>
-      `;
-      box.prepend(entry);
-    }
-
-    function toggleOpticalBeamer() {
-      opticalBeamerActive = !opticalBeamerActive;
-    }
-
-    function startAudioSpectrumVisualizer(stream) {
-      const ctxAudio = new AudioContext();
-      const src = ctxAudio.createMediaStreamSource(stream);
-      const analyser = ctxAudio.createAnalyser();
-      analyser.fftSize = 128;
-      src.connect(analyser);
-      const bins = new Uint8Array(analyser.frequencyBinCount);
-      const canvas = document.getElementById('audioCanvas');
-      const ctx = canvas.getContext('2d');
-
-      function drawAudio() {
-        requestAnimationFrame(drawAudio);
-        analyser.getByteFrequencyData(bins);
-        ctx.fillStyle = '#03060c';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        const w = canvas.width / bins.length;
-        for (let i = 0; i < bins.length; i++) {
-          const h = (bins[i] / 255) * canvas.height;
-          ctx.fillStyle = i % 2 === 0 ? '#00e5ff' : '#00e676';
-          ctx.fillRect(i * w, canvas.height - h, w - 1, h);
-        }
-      }
-      drawAudio();
-    }
-
-    function startOpticalMatrixLoop() {
-      const canvas = document.getElementById('opticalCanvas');
-      const ctx = canvas.getContext('2d');
-      let frame = 0;
-
-      function render() {
-        requestAnimationFrame(render);
-        frame++;
-        ctx.fillStyle = '#03060c';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        const grid = Number(document.getElementById('mimoGrid').value) || 4;
-        const pad = 28;
-        const matrixSize = Math.min(canvas.width * 0.45, canvas.height - pad * 2);
-        const cell = matrixSize / grid;
-
-        // 4 Corner Fiduciary Alignment Targets for Smartphone Rolling-Shutter Lock
-        ctx.fillStyle = '#00e5ff';
-        [[14, 14], [14 + matrixSize + 16, 14], [14, 14 + matrixSize + 16], [14 + matrixSize + 16, 14 + matrixSize + 16]].forEach(([x, y]) => {
-          ctx.fillRect(x, y, 10, 10);
-        });
-
-        for (let r = 0; r < grid; r++) {
-          for (let c = 0; c < grid; c++) {
-            const idx = (r * grid + c + Math.floor(frame / 4)) % latestEncodedBytes.length;
-            const sym = opticalBeamerActive ? (latestEncodedBytes[idx] & 0x07) : 0;
-            const [cr, cg, cb] = LumaCore.CSK_PALETTE[sym].rgb;
-            ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
-            ctx.fillRect(pad + c * cell + 2, pad + r * cell + 2, cell - 4, cell - 4);
-          }
-        }
-
-        // Right-side Differential Rolling-Shutter Waveform Trace
-        const waveX = pad + matrixSize + 44;
-        const waveW = canvas.width - waveX - 18;
-        ctx.strokeStyle = '#1e2d4a';
-        ctx.strokeRect(waveX, pad, waveW, matrixSize);
-
-        ['#ff3d57', '#00e676', '#00e5ff'].forEach((color, ch) => {
-          ctx.beginPath();
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 1.6;
-          for (let x = 0; x < waveW; x += 3) {
-            const bit = ((latestEncodedBytes[(x + frame) % latestEncodedBytes.length] >> ch) & 1);
-            const y = pad + matrixSize * (0.2 + ch * 0.3) + (bit ? -14 : 14);
-            if (x === 0) ctx.moveTo(waveX + x, y);
-            else ctx.lineTo(waveX + x, y);
-          }
-          ctx.stroke();
-        });
-      }
-      render();
-    }
-
-    connectWebSocket();
-    startOpticalMatrixLoop();
-  </script>
-</body>
-</html>
+<!-- PANEL 7: CONVERSATION (LAN VOICE CALLS) & LIVE PHONE CAMERA OPTICAL DECODER -->
+<section class="card span-5">
+  <div class="card-head">
+    <h2>07 // LINKED DEVICES: VOICE CONVERSATION &amp; CAMERA OPTICAL RX</h2>
+    <span class="mono-tag emerald" id="voiceCallState">STANDBY</span>
+  </div>
+  <div id="linkedDevicesList" class="device-list"></div>
+  <div style="display:flex; gap:8px; margin-top:8px;">
+    <button class="btn-danger" id="btnHangupCall" style="display:none;" onclick="DeviceLinkManager.hangup()">END CONVERSATION</button>
+    <button class="btn-ghost" onclick="DeviceLinkManager.toggleOpticalCameraRx()">TOGGLE PHONE/PC CAMERA OPTICAL RX</button>
+  </div>
+  <audio id="remoteVoiceAudio" autoplay playsinline></audio>
+  <video id="opticalCamPreview" autoplay playsinline muted style="display:none; width:100%; max-height:130px; margin-top:8px; border-radius:6px; border:1px solid #1e2e4a;"></video>
+  <div id="opticalCamReadout" class="mono-tag" style="margin-top:6px; color:#00e5ff;"></div>
+</section>
